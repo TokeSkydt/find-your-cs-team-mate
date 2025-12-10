@@ -12,7 +12,7 @@ export default function Navbar() {
 
       <ul className="flex space-x-4 cursor-pointer items-center">
         <li><Link href="/">Home</Link></li>
-        <Link href="/Team">
+        <Link href="/playerlist">
           <li>Find Your Team</li>
         </Link>
 
