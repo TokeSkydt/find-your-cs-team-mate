@@ -15,7 +15,6 @@ const Profile = () => {
 
   useEffect(() => {
     if (session?.user?.id) {
-      // Fetch user's profile from Supabase
       const fetchProfile = async () => {
         setLoading(true);
         setError(null);
@@ -25,7 +24,7 @@ const Profile = () => {
         const { data, error } = await supabase
           .from("users")
           .select(
-            "about_me, faceit_elo, faceit_level, faceit_wins, faceit_losses, faceit_nickname, avatar, cover_image"
+            "about_me, faceit_elo, faceit_level, faceit_wins, faceit_losses, faceit_nickname, avatar"
           )
           .eq("discord_id", String(session.user.id))
           .limit(1);
@@ -42,21 +41,41 @@ const Profile = () => {
         const nickname = profile?.faceit_nickname || "";
         setFaceitNickname(nickname);
 
-        // If nickname exists, automatically fetch Faceit stats for display (no Save click needed)
+        // If nickname exists, check Faceit API to see if elo changed
         if (nickname) {
           try {
             const faceitData = await fetchFaceitStats(nickname);
-            // normalize cs2 shape (Faceit may return games.cs2 or cs2)
-            const cs2 = faceitData?.games?.cs2 ?? faceitData?.cs2 ?? null;
+            const cs2 = faceitData?.games?.cs2 ?? null;
 
             if (cs2) {
+              const liveElo = cs2.faceit_elo;
+              const cachedElo = profile?.faceit_elo;
+
+              // If elo differs, update cache in Supabase
+              if (liveElo && cachedElo && liveElo !== cachedElo) {
+                console.log(
+                  `Elo changed: ${cachedElo} → ${liveElo}, updating cache...`
+                );
+                await supabase
+                  .from("users")
+                  .update({
+                    faceit_elo: liveElo,
+                    faceit_level: cs2.skill_level || 0,
+                    faceit_wins: cs2.wins || 0,
+                    faceit_losses: cs2.losses || 0,
+                    avatar: faceitData.avatar || "",
+                    country: faceitData.country || "",
+                  })
+                  .eq("discord_id", String(session.user.id));
+              }
+
               setFaceitStats({
-                nickname: faceitData.nickname ?? faceitData.player_nickname ?? nickname,
+                nickname: faceitData.nickname ?? nickname,
                 country: faceitData.country ?? "",
                 avatar: faceitData.avatar ?? profile?.avatar ?? "",
-                cover_image: faceitData.cover_image ?? profile?.cover_image ?? "",
-                skillLevel: cs2.skill_level ?? cs2.skillLevel ?? null,
-                faceitElo: cs2.faceit_elo ?? cs2.elo ?? null,
+                cover_image: faceitData.cover_image ?? "",
+                skillLevel: cs2.skill_level ?? null,
+                faceitElo: liveElo ?? null,
                 wins: cs2.wins ?? 0,
                 losses: cs2.losses ?? 0,
               });
@@ -66,10 +85,9 @@ const Profile = () => {
             }
           } catch (err) {
             console.error("Failed to fetch Faceit stats on load:", err);
-            setError(null); // non-blocking - keep profile visible
+            setError(null); // non-blocking
           }
         } else {
-          // no nickname yet -> clear any Faceit UI
           setFaceitStats(null);
         }
 
