@@ -12,7 +12,9 @@ export default function Navbar() {
 
       <ul className="flex space-x-4 cursor-pointer items-center">
         <li><Link href="/">Home</Link></li>
-        <li>Get Your Team</li>
+        <Link href="/Team">
+          <li>Find Your Team</li>
+        </Link>
 
         {/* If the user is signed in, show profile info and Logout button */}
         {session ? (

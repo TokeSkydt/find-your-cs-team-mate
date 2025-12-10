@@ -25,24 +25,52 @@ const Profile = () => {
         const { data, error } = await supabase
           .from("users")
           .select(
-            "about_me, faceit_elo, faceit_level, faceit_wins, faceit_losses, faceit_nickname"
+            "about_me, faceit_elo, faceit_level, faceit_wins, faceit_losses, faceit_nickname, avatar, cover_image"
           )
-          .eq("discord_id", String(session.user.id)) // Ensure we are checking for discord_id
-          .limit(1); // Limit results to 1 record
+          .eq("discord_id", String(session.user.id))
+          .limit(1);
 
         if (error) {
           console.error("Error fetching user profile:", error.message);
           setError("Failed to load your profile. Please try again later.");
+          setLoading(false);
+          return;
+        }
+
+        const profile = data?.[0];
+        setAboutMe(profile?.about_me || "");
+        const nickname = profile?.faceit_nickname || "";
+        setFaceitNickname(nickname);
+
+        // If nickname exists, automatically fetch Faceit stats for display (no Save click needed)
+        if (nickname) {
+          try {
+            const faceitData = await fetchFaceitStats(nickname);
+            // normalize cs2 shape (Faceit may return games.cs2 or cs2)
+            const cs2 = faceitData?.games?.cs2 ?? faceitData?.cs2 ?? null;
+
+            if (cs2) {
+              setFaceitStats({
+                nickname: faceitData.nickname ?? faceitData.player_nickname ?? nickname,
+                country: faceitData.country ?? "",
+                avatar: faceitData.avatar ?? profile?.avatar ?? "",
+                cover_image: faceitData.cover_image ?? profile?.cover_image ?? "",
+                skillLevel: cs2.skill_level ?? cs2.skillLevel ?? null,
+                faceitElo: cs2.faceit_elo ?? cs2.elo ?? null,
+                wins: cs2.wins ?? 0,
+                losses: cs2.losses ?? 0,
+              });
+            } else {
+              console.warn("No CS2 stats for:", nickname);
+              setFaceitStats(null);
+            }
+          } catch (err) {
+            console.error("Failed to fetch Faceit stats on load:", err);
+            setError(null); // non-blocking - keep profile visible
+          }
         } else {
-          console.log("Fetched profile data:", data);
-          setAboutMe(data?.[0]?.about_me || "");
-          setFaceitNickname(data?.[0]?.faceit_nickname || ""); // Set Faceit nickname if available
-          setFaceitStats({
-            elo: data?.[0]?.faceit_elo || 0,
-            level: data?.[0]?.faceit_level || 0,
-            wins: data?.[0]?.faceit_wins || 0,
-            losses: data?.[0]?.faceit_losses || 0,
-          }); // Load Faceit stats from Supabase
+          // no nickname yet -> clear any Faceit UI
+          setFaceitStats(null);
         }
 
         setLoading(false);
@@ -54,30 +82,28 @@ const Profile = () => {
 
   // Handle saving the profile including Faceit nickname and stats
   const handleSave = async () => {
-    if (!session?.user?.id || !session?.user?.name) {
-      return; // Don't proceed if session data is incomplete
-    }
+  if (!session?.user?.id || !session?.user?.name) return;
 
-    const { error } = await supabase
-      .from("users")
-      .upsert({
-        discord_id: session.user.id,
-        name: session.user.name,
-        about_me: aboutMe,
-        faceit_nickname: faceitNickname,
-      })
-      .eq("discord_id", session.user.id); // Use .eq() to ensure you're updating the correct user
-
-    if (error) {
-      console.error("Error updating profile:", error.message);
-      setError("Failed to update your profile. Please try again later.");
-    } else {
-      alert("Profile updated successfully!");
-      if (faceitNickname) {
-        fetchAndUpdateFaceitStats(faceitNickname); // Only fetch stats if nickname is provided
-      }
-    }
+  const payload = {
+    discord_id: session.user.id,
+    name: session.user.name,
+    about_me: aboutMe,
+    faceit_nickname: faceitNickname,
   };
+
+  const { data, error } = await supabase
+    .from("users")
+    .upsert(payload, { onConflict: "discord_id" }); // <- ensure discord_id is the conflict key
+
+  if (error) {
+    console.error("Error updating profile:", error.message);
+    setError("Failed to update your profile. Please try again later.");
+    return;
+  }
+
+  alert("Profile updated successfully!");
+  if (faceitNickname) fetchAndUpdateFaceitStats(faceitNickname);
+};
 
   // Fetch and update Faceit stats with nickname
   const fetchAndUpdateFaceitStats = async (
@@ -149,10 +175,10 @@ const Profile = () => {
 
       <div className="mb-6">
         <label
-          htmlFor="aboutMe"
+          htmlFor="role"
           className="block text-sm font-medium text-gray-700"
         >
-          About Me
+          what i like to play
         </label>
         <textarea
           id="aboutMe"
